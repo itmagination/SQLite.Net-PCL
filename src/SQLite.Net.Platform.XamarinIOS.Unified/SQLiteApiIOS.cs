@@ -1,11 +1,16 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
+using SQLite.Net.Functions.Scalar;
 using SQLite.Net.Interop;
 
 namespace SQLite.Net.Platform.XamarinIOS
 {
     public class SQLiteApiIOS : ISQLiteApiExt
     {
+        private IList<GCHandle> _allocatedGCHandles = new List<GCHandle>();
+
         public Result Open(byte[] filename, out IDbHandle db, int flags, IntPtr zvfs)
         {
             IntPtr dbPtr;
@@ -211,9 +216,54 @@ namespace SQLite.Net.Platform.XamarinIOS
             var internalStmt = (DbStatement) stmt;
             return SQLiteApiIOSInternal.ColumnByteArray(internalStmt.StmtPtr, index);
         }
+        
+        public int CreateScalarFunction(IDbHandle dbHandle, IScalarFunction sqliteFunction)
+        {
+            var internalDbHandle = (DbHandle)dbHandle;
+
+            var funcCallbackExecutor = new FuncCallbackExecutor(
+                sqliteFunction,
+                SQLiteApiIOSInternal.GetAnsiString,
+                SQLiteApiIOSInternal.sqlite3_result_int
+            );
+
+            var func = new SQLiteApiIOSInternal.FuncCallback(funcCallbackExecutor.Execute);
+
+            _allocatedGCHandles.Add(GCHandle.Alloc(func));
+
+            return SQLiteApiIOSInternal.sqlite3_create_function(
+                internalDbHandle.DbPtr,
+                Encoding.UTF8.GetBytes(sqliteFunction.Name),
+                sqliteFunction.ValueGetters.Length,
+                SQLiteEncodings.SQLITE_UTF8,
+                IntPtr.Zero,
+                func,
+                null,
+                null);
+        }
+
+        public int CreateCollation(IDbHandle db, ICollation collation)
+        {
+            var internalDbHandle = (DbHandle)db;
+
+            var compareCallbackExecutor = new CompareCallbackExecutor(
+                collation,
+                SQLiteApiIOSInternal.GetCompareCallbackStringBytes);
+
+            var func = new SQLiteApiIOSInternal.CompareCallback(compareCallbackExecutor.Execute);
+
+            _allocatedGCHandles.Add(GCHandle.Alloc(func));
+
+            return SQLiteApiIOSInternal.sqlite3_create_collation(
+                internalDbHandle.DbPtr,
+                Encoding.UTF8.GetBytes(collation.Name),
+                SQLiteEncodings.SQLITE_UTF8,
+                IntPtr.Zero,
+                func);
+        }
 
         #region Backup
-        
+
         public IDbBackupHandle BackupInit(IDbHandle destHandle, string destName, IDbHandle srcHandle, string srcName) {
         	var internalDestDb = (DbHandle)destHandle;
         	var internalSrcDb = (DbHandle)srcHandle;

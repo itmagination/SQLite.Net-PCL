@@ -20,6 +20,7 @@
 // THE SOFTWARE.
 
 using System;
+using SQLite.Net.Functions.Scalar;
 
 namespace SQLite.Net.Interop
 {

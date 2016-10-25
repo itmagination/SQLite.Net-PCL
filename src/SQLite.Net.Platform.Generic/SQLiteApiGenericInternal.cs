@@ -158,6 +158,45 @@ namespace SQLite.Net.Platform.Generic
         [DllImport("sqlite3", EntryPoint = "sqlite3_sourceid", CallingConvention = CallingConvention.Cdecl)]		
 		public static extern IntPtr sqlite3_sourceid();
 
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        public delegate void FuncCallback(IntPtr context, int valueIndex, [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)]IntPtr[] values);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        public delegate void StepCallback(IntPtr context, int valueIndex, [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)]IntPtr[] values);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        public delegate void FinalCallback(IntPtr context);
+
+        [DllImport("sqlite3", CallingConvention = CallingConvention.Cdecl)]
+        public static extern int sqlite3_create_function(IntPtr db, byte[] functionNameBytes, int argsNumber, int encodingType, IntPtr userDataFunc, FuncCallback func, StepCallback step, FinalCallback final);
+
+        [DllImport("sqlite3", CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr sqlite3_value_text(IntPtr value);
+
+        [DllImport("sqlite3", CallingConvention = CallingConvention.Cdecl)]
+        public static extern void sqlite3_result_int(IntPtr context, int value);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        public delegate int CompareCallback(IntPtr pvUser, int len1, IntPtr pv1, int len2, IntPtr pv2);
+
+        [DllImport("sqlite3", CallingConvention = CallingConvention.Cdecl)]
+        public static extern int sqlite3_create_collation(IntPtr db, byte[] strName, int nType, IntPtr pvUser, CompareCallback func);
+
+        public static string GetAnsiString(IntPtr valueTextPointer)
+        {
+            var stringPointer = sqlite3_value_text(valueTextPointer);
+            var str = Marshal.PtrToStringAnsi(stringPointer);
+            return str;
+        }
+
+        public static byte[] GetCompareCallbackStringBytes(IntPtr intPtr, int length)
+        {
+            byte[] array = new byte[length];
+            Marshal.Copy(intPtr, array, 0, length);
+
+            return array;
+        }
+
         #region Backup
 
         [DllImport("sqlite3", EntryPoint = "sqlite3_backup_init", CallingConvention = CallingConvention.Cdecl)]
