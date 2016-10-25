@@ -31,6 +31,7 @@ using System.Text;
 using System.Threading;
 using JetBrains.Annotations;
 using SQLite.Net.Attributes;
+using SQLite.Net.Functions.Scalar;
 using SQLite.Net.Interop;
 
 namespace SQLite.Net
@@ -1865,6 +1866,19 @@ namespace SQLite.Net
                 }
             }
         }
+
+        [PublicAPI]
+        public void CreateScalarFunction(IScalarFunction sqliteFunction)
+        {
+            Platform.SQLiteApi.CreateScalarFunction(Handle, sqliteFunction);
+        }
+
+        [PublicAPI]
+        public void CreateCollation(ICollation collation)
+        {
+            Platform.SQLiteApi.CreateCollation(Handle, collation);
+        }
+
 
         public class ColumnInfo
         {

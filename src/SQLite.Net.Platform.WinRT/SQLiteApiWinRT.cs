@@ -1,7 +1,9 @@
 ﻿using System;
+using System.Collections.Generic;
 using SQLite.Net.Interop;
 using System.Runtime.InteropServices;
 using System.Text;
+using SQLite.Net.Functions.Scalar;
 using Sqlite3DatabaseHandle = System.IntPtr;
 using Sqlite3Statement = System.IntPtr;
 
@@ -10,6 +12,8 @@ namespace SQLite.Net.Platform.WinRT
     public class SQLiteApiWinRT : ISQLiteApiExt
     {
         private readonly bool _useWinSqlite;
+
+        private IList<GCHandle> _allocatedGCHandles = new List<GCHandle>();
 
         /// <summary>
         /// Creates a SQLite API object for use from WinRT.
@@ -220,6 +224,100 @@ namespace SQLite.Net.Platform.WinRT
         public byte[] ColumnByteArray(IDbStatement stmt, int index)
         {
             return ColumnBlob(stmt, index);
+        }
+
+        public int CreateScalarFunction(IDbHandle dbHandle, IScalarFunction sqliteFunction)
+        {
+            var internalDbHandle = (DbHandle)dbHandle;
+
+            FuncCallbackExecutor funcCallbackExecutor = null;
+
+            if (_useWinSqlite)
+            {
+                funcCallbackExecutor = new FuncCallbackExecutor(
+                    sqliteFunction,
+                    WinSQLite3.GetAnsiString,
+                    WinSQLite3.sqlite3_result_int
+                );
+
+                var func = new WinSQLite3.FuncCallback(funcCallbackExecutor.Execute);
+
+                _allocatedGCHandles.Add(GCHandle.Alloc(func));
+
+                return WinSQLite3.sqlite3_create_function(
+                    internalDbHandle.InternalDbHandle,
+                    Encoding.UTF8.GetBytes(sqliteFunction.Name),
+                    sqliteFunction.ValueGetters.Length,
+                    SQLiteEncodings.SQLITE_UTF8,
+                    IntPtr.Zero,
+                    func,
+                    null,
+                    null);
+            }
+            else
+            {
+                funcCallbackExecutor = new FuncCallbackExecutor(
+                    sqliteFunction,
+                    SQLite3.GetAnsiString,
+                    SQLite3.sqlite3_result_int
+                );
+
+                var func = new SQLite3.FuncCallback(funcCallbackExecutor.Execute);
+
+                _allocatedGCHandles.Add(GCHandle.Alloc(func));
+
+                return SQLite3.sqlite3_create_function(
+                    internalDbHandle.InternalDbHandle,
+                    Encoding.UTF8.GetBytes(sqliteFunction.Name),
+                    sqliteFunction.ValueGetters.Length,
+                    SQLiteEncodings.SQLITE_UTF8,
+                    IntPtr.Zero,
+                    func,
+                    null,
+                    null);
+            }
+        }
+
+        public int CreateCollation(IDbHandle db, ICollation collation)
+        {
+            if (_useWinSqlite)
+            {
+                var internalDbHandle = (DbHandle)db;
+
+                var compareCallbackExecutor = new CompareCallbackExecutor(
+                    collation,
+                    WinSQLite3.GetCompareCallbackStringBytes);
+
+                var func = new WinSQLite3.CompareCallback(compareCallbackExecutor.Execute);
+
+                _allocatedGCHandles.Add(GCHandle.Alloc(func));
+
+                return WinSQLite3.sqlite3_create_collation(
+                    internalDbHandle.InternalDbHandle,
+                    Encoding.UTF8.GetBytes(collation.Name),
+                    SQLiteEncodings.SQLITE_UTF8,
+                    IntPtr.Zero,
+                    func);
+            }
+            else
+            {
+                var internalDbHandle = (DbHandle)db;
+
+                var compareCallbackExecutor = new CompareCallbackExecutor(
+                collation,
+                SQLite3.GetCompareCallbackStringBytes);
+
+                var func = new SQLite3.CompareCallback(compareCallbackExecutor.Execute);
+
+                _allocatedGCHandles.Add(GCHandle.Alloc(func));
+
+                return SQLite3.sqlite3_create_collation(
+                    internalDbHandle.InternalDbHandle,
+                    Encoding.UTF8.GetBytes(collation.Name),
+                    SQLiteEncodings.SQLITE_UTF8,
+                    IntPtr.Zero,
+                    func);
+            }
         }
 
         public int ColumnBytes(IDbStatement stmt, int index)
@@ -643,6 +741,14 @@ namespace SQLite.Net.Platform.WinRT
                 return (other is DbStatement) && ((DbStatement)other).InternalStmt == InternalStmt;
             }
         }
+
+        ~SQLiteApiWinRT()
+        {
+            foreach (GCHandle handle in _allocatedGCHandles)
+            {
+                handle.Free();
+            }
+        }
     }
 
     public static class SQLite3
@@ -777,6 +883,45 @@ namespace SQLite.Net.Platform.WinRT
 
         [DllImport("sqlite3", EntryPoint = "sqlite3_sourceid", CallingConvention = CallingConvention.Cdecl)]
         public static extern IntPtr sqlite3_sourceid();
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        public delegate void FuncCallback(IntPtr context, int valueIndex, [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)]IntPtr[] values);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        public delegate void StepCallback(IntPtr context, int valueIndex, [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)]IntPtr[] values);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        public delegate void FinalCallback(IntPtr context);
+
+        [DllImport("sqlite3", CallingConvention = CallingConvention.Cdecl)]
+        public static extern void sqlite3_result_int(IntPtr context, int value);
+
+        [DllImport("sqlite3", CallingConvention = CallingConvention.Cdecl)]
+        public static extern int sqlite3_create_function(IntPtr db, byte[] functionNameBytes, int argsNumber, int encodingType, IntPtr userDataFunc, FuncCallback func, StepCallback step, FinalCallback final);
+
+        [DllImport("sqlite3", CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr sqlite3_value_text(IntPtr value);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        public delegate int CompareCallback(IntPtr pvUser, int len1, IntPtr pv1, int len2, IntPtr pv2);
+
+        [DllImport("sqlite3", CallingConvention = CallingConvention.Cdecl)]
+        public static extern int sqlite3_create_collation(IntPtr db, byte[] strName, int nType, IntPtr pvUser, CompareCallback func);
+
+        public static string GetAnsiString(IntPtr valueTextPointer)
+        {
+            var stringPointer = sqlite3_value_text(valueTextPointer);
+            var str = Marshal.PtrToStringAnsi(stringPointer);
+            return str;
+        }
+
+        public static byte[] GetCompareCallbackStringBytes(IntPtr intPtr, int length)
+        {
+            byte[] array = new byte[length];
+            Marshal.Copy(intPtr, array, 0, length);
+
+            return array;
+        }
 
         #region Backup
 
@@ -940,6 +1085,45 @@ namespace SQLite.Net.Platform.WinRT
 
         [DllImport("winsqlite3", EntryPoint = "sqlite3_sourceid", CallingConvention = CallingConvention.Cdecl)]
         public static extern IntPtr sqlite3_sourceid();
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        public delegate void FuncCallback(IntPtr context, int valueIndex, [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)]IntPtr[] values);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        public delegate void StepCallback(IntPtr context, int valueIndex, [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)]IntPtr[] values);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        public delegate void FinalCallback(IntPtr context);
+
+        [DllImport("winsqlite3", CallingConvention = CallingConvention.Cdecl)]
+        public static extern void sqlite3_result_int(IntPtr context, int value);
+
+        [DllImport("winsqlite3", CallingConvention = CallingConvention.Cdecl)]
+        public static extern int sqlite3_create_function(IntPtr db, byte[] functionNameBytes, int argsNumber, int encodingType, IntPtr userDataFunc, FuncCallback func, StepCallback step, FinalCallback final);
+
+        [DllImport("winsqlite3", CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr sqlite3_value_text(IntPtr value);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        public delegate int CompareCallback(IntPtr pvUser, int len1, IntPtr pv1, int len2, IntPtr pv2);
+
+        [DllImport("winsqlite3", CallingConvention = CallingConvention.Cdecl)]
+        public static extern int sqlite3_create_collation(IntPtr db, byte[] strName, int nType, IntPtr pvUser, CompareCallback func);
+
+        public static string GetAnsiString(IntPtr valueTextPointer)
+        {
+            var stringPointer = sqlite3_value_text(valueTextPointer);
+            var str = Marshal.PtrToStringAnsi(stringPointer);
+            return str;
+        }
+
+        public static byte[] GetCompareCallbackStringBytes(IntPtr intPtr, int length)
+        {
+            byte[] array = new byte[length];
+            Marshal.Copy(intPtr, array, 0, length);
+
+            return array;
+        }
 
         #region Backup
 

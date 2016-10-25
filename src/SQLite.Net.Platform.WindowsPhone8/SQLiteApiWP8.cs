@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Text;
 using Sqlite;
+using SQLite.Net.Functions.Scalar;
 using SQLite.Net.Interop;
 
 namespace SQLite.Net.Platform.WindowsPhone8
@@ -211,6 +212,16 @@ namespace SQLite.Net.Platform.WindowsPhone8
         public byte[] ColumnByteArray(IDbStatement stmt, int index)
         {
             return ColumnBlob(stmt, index);
+        }
+
+        public int CreateScalarFunction(IDbHandle dbHandle, IScalarFunction sqliteFunction)
+        {
+            throw new NotImplementedException();
+        }
+
+        public int CreateCollation(IDbHandle db, ICollation collation)
+        {
+            throw new NotImplementedException();
         }
 
         public string ColumnText16(IDbStatement stmt, int index)

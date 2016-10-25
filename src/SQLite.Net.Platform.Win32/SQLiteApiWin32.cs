@@ -1,11 +1,16 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
+using SQLite.Net.Functions.Scalar;
 using SQLite.Net.Interop;
 
 namespace SQLite.Net.Platform.Win32
 {
     public class SQLiteApiWin32 : ISQLiteApiExt
     {
+        private IList<GCHandle> _allocatedGCHandles = new List<GCHandle>();
+
         public SQLiteApiWin32(string nativeInteropSearchPath = null)
         {
             if (nativeInteropSearchPath  != null)
@@ -219,8 +224,53 @@ namespace SQLite.Net.Platform.Win32
             return SQLiteApiWin32Internal.ColumnByteArray(internalStmt.StmtPtr, index);
         }
 
+        public int CreateScalarFunction(IDbHandle db, IScalarFunction sqliteFunction)
+        {
+            var internalDbHandle = (DbHandle)db;
+
+            var funcCallbackExecutor = new FuncCallbackExecutor(
+                sqliteFunction,
+                SQLiteApiWin32Internal.GetAnsiString,
+                SQLiteApiWin32Internal.sqlite3_result_int
+            );
+
+            var func = new SQLiteApiWin32Internal.FuncCallback(funcCallbackExecutor.Execute);
+
+            _allocatedGCHandles.Add(GCHandle.Alloc(func));
+
+            return SQLiteApiWin32Internal.sqlite3_create_function(
+                internalDbHandle.DbPtr,
+                Encoding.UTF8.GetBytes(sqliteFunction.Name),
+                sqliteFunction.ValueGetters.Length,
+                SQLiteEncodings.SQLITE_UTF8,
+                IntPtr.Zero,
+                func,
+                null,
+                null);
+        }
+
+        public int CreateCollation(IDbHandle db, ICollation collation)
+        {
+            var internalDbHandle = (DbHandle)db;
+
+            var compareCallbackExecutor = new CompareCallbackExecutor(
+                collation,
+                SQLiteApiWin32Internal.GetCompareCallbackStringBytes);
+
+            var func = new SQLiteApiWin32Internal.CompareCallback(compareCallbackExecutor.Execute);
+
+            _allocatedGCHandles.Add(GCHandle.Alloc(func));
+
+            return SQLiteApiWin32Internal.sqlite3_create_collation(
+                internalDbHandle.DbPtr,
+                Encoding.UTF8.GetBytes(collation.Name),
+                SQLiteEncodings.SQLITE_UTF8,
+                IntPtr.Zero,
+                func);
+        }
+
         #region Backup
-        
+
         public IDbBackupHandle BackupInit(IDbHandle destHandle, string destName, IDbHandle srcHandle, string srcName) {
         	var internalDestDb = (DbHandle)destHandle;
         	var internalSrcDb = (DbHandle)srcHandle;
@@ -302,6 +352,14 @@ namespace SQLite.Net.Platform.Win32
             public bool Equals(IDbStatement other)
             {
                 return other is DbStatement && StmtPtr == ((DbStatement) other).StmtPtr;
+            }
+        }
+
+        ~SQLiteApiWin32()
+        {
+            foreach (GCHandle handle in _allocatedGCHandles)
+            {
+                handle.Free();
             }
         }
     }

@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using SQLite.Net.Functions.Scalar;
 using SQLite.Net.Interop;
 
 namespace SQLite.Net.Platform.OSX
@@ -211,6 +212,16 @@ namespace SQLite.Net.Platform.OSX
         {
             var internalStmt = (DbStatement) stmt;
             return SQLiteApiOSXInternal.ColumnByteArray(internalStmt.StmtPtr, index);
+        }
+
+        public int CreateScalarFunction(IDbHandle dbHandle, IScalarFunction sqliteFunction)
+        {
+            throw new NotImplementedException();
+        }
+
+        public int CreateCollation(IDbHandle db, ICollation collation)
+        {
+            throw new NotImplementedException();
         }
 
         #region Backup

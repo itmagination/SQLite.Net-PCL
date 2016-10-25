@@ -21,6 +21,7 @@
 
 using System;
 using JetBrains.Annotations;
+using SQLite.Net.Functions.Scalar;
 
 namespace SQLite.Net.Interop
 {
@@ -75,5 +76,9 @@ namespace SQLite.Net.Interop
         //        string ColumnText(IDbStatement stmt, int index);
 
         byte[] ColumnByteArray(IDbStatement stmt, int index);
+
+        int CreateScalarFunction(IDbHandle dbHandle, IScalarFunction sqliteFunction);
+
+        int CreateCollation(IDbHandle db, ICollation collation);
     }
 }
